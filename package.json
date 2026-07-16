@@ -1,0 +1,13 @@
+{
+  "name": "adorable",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Lovable.com clone POC - prompts to live React apps",
+  "scripts": {
+    "install:all": "npm install && npm --prefix server install && npm --prefix runner install",
+    "dev": "concurrently -n server,runner -c blue,magenta \"npm --prefix server run dev\" \"npm --prefix runner run dev\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0"
+  }
+}
