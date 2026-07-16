@@ -17,6 +17,7 @@ A local web app that turns natural-language prompts into working multi-file Reac
      - **Code** — file tree of the generated project + read-only file viewer.
    - Top bar: project name (renameable), version history dropdown (restore any snapshot), Export (.zip download), Publish button.
 3. **Iterative edits** — follow-up prompts modify the existing app. The model returns only changed/added files (plus optional deletions), merged into the project.
+3a. **Conversational replies** — when a prompt is ambiguous (or is a question rather than a build request), the model may respond with a plain chat message / clarifying question instead of code. Response schema: `{"type":"chat","message":"…"}` vs `{"type":"code","files":[…],"deleted":[…],"summary":"…"}`. The user's answer continues the thread with full history as context.
 4. **Version history** — every generation stores a full file snapshot with the prompt as its label; any version can be restored (restore creates a new snapshot).
 5. **Publish** — builds the current project (`vite build`) and serves the static output at `http://localhost:3001/p/<projectId>/`; the URL is shown in the UI.
 6. **Export** — download the project files as a zip.
