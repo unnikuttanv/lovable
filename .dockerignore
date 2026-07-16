@@ -1,0 +1,8 @@
+**/node_modules
+.git
+docs
+server/data
+server/published
+server/.env
+runner/dist
+.gstack

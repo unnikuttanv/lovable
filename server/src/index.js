@@ -4,20 +4,22 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import archiver from 'archiver';
-import { listProjects, createProject, getProject, saveProject, deleteProject } from './store.js';
+import { init, listProjects, createProject, getProject, saveProject, deleteProject, getUsage, STORE_KIND } from './storage.js';
 import { startGeneration, getGeneration, subscribe } from './generation.js';
-import { activateProject } from './runnerSync.js';
 import { publishProject, PUBLISHED_DIR } from './publish.js';
+import { authMiddleware } from './auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT_DIR = path.resolve(__dirname, '..', '..', 'client');
-const PORT = 3001;
+const PORT = Number(process.env.PORT || 3001);
 const DEFAULT_MODEL = process.env.OPENROUTER_MODEL || 'anthropic/claude-sonnet-4.5';
+const DAILY_LIMIT = Number(process.env.DAILY_GENERATION_LIMIT || 50);
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(CLIENT_DIR));
 app.use('/p', express.static(PUBLISHED_DIR));
+app.use('/api', authMiddleware);
 
 const MODELS = [
   { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5' },
@@ -28,52 +30,62 @@ const MODELS = [
   { id: 'meta-llama/llama-3.3-70b-instruct', name: 'Llama 3.3 70B' },
 ];
 
+const wrap = (fn) => (req, res) => fn(req, res).catch((err) => {
+  console.error(err);
+  if (!res.headersSent) res.status(500).json({ error: err.message });
+});
+
+app.get('/api/me', wrap(async (req, res) => {
+  const used = await getUsage(req.userEmail);
+  res.json({ email: req.userEmail, dailyLimit: DAILY_LIMIT, usedToday: used });
+}));
+
 app.get('/api/models', (req, res) => {
   res.json({ models: MODELS, default: DEFAULT_MODEL });
 });
 
-app.get('/api/projects', (req, res) => {
-  res.json(listProjects());
-});
+app.get('/api/projects', wrap(async (req, res) => {
+  res.json(await listProjects(req.userEmail));
+}));
 
-app.post('/api/projects', (req, res) => {
+app.post('/api/projects', wrap(async (req, res) => {
   const { prompt, model } = req.body || {};
   if (!prompt?.trim()) return res.status(400).json({ error: 'prompt is required' });
   const name = prompt.trim().slice(0, 40);
-  const project = createProject({ name, model: model || DEFAULT_MODEL });
-  const generationId = startGeneration(project.id, prompt.trim());
+  const project = await createProject({ name, model: model || DEFAULT_MODEL, owner: req.userEmail });
+  const generationId = startGeneration(project.id, prompt.trim(), req.userEmail);
   res.json({ project, generationId });
-});
+}));
 
-app.get('/api/projects/:id', (req, res) => {
-  const project = getProject(req.params.id);
+app.get('/api/projects/:id', wrap(async (req, res) => {
+  const project = await getProject(req.params.id, req.userEmail);
   if (!project) return res.status(404).json({ error: 'not found' });
   res.json(project);
-});
+}));
 
-app.patch('/api/projects/:id', (req, res) => {
-  const project = getProject(req.params.id);
+app.patch('/api/projects/:id', wrap(async (req, res) => {
+  const project = await getProject(req.params.id, req.userEmail);
   if (!project) return res.status(404).json({ error: 'not found' });
   if (req.body?.name?.trim()) project.name = req.body.name.trim().slice(0, 60);
-  saveProject(project);
+  await saveProject(project);
   res.json(project);
-});
+}));
 
-app.delete('/api/projects/:id', (req, res) => {
-  res.json({ deleted: deleteProject(req.params.id) });
-});
+app.delete('/api/projects/:id', wrap(async (req, res) => {
+  res.json({ deleted: await deleteProject(req.params.id, req.userEmail) });
+}));
 
-app.post('/api/projects/:id/messages', (req, res) => {
-  const project = getProject(req.params.id);
+app.post('/api/projects/:id/messages', wrap(async (req, res) => {
+  const project = await getProject(req.params.id, req.userEmail);
   if (!project) return res.status(404).json({ error: 'not found' });
   const { prompt } = req.body || {};
   if (!prompt?.trim()) return res.status(400).json({ error: 'prompt is required' });
-  const generationId = startGeneration(project.id, prompt.trim());
+  const generationId = startGeneration(project.id, prompt.trim(), req.userEmail);
   res.json({ generationId });
-});
+}));
 
 app.get('/api/generations/:genId/stream', (req, res) => {
-  const gen = getGeneration(req.params.genId);
+  const gen = getGeneration(req.params.genId, req.userEmail);
   if (!gen) return res.status(404).json({ error: 'not found' });
 
   res.setHeader('Content-Type', 'text/event-stream');
@@ -93,15 +105,8 @@ app.get('/api/generations/:genId/stream', (req, res) => {
   req.on('close', unsubscribe);
 });
 
-app.post('/api/projects/:id/activate', (req, res) => {
-  const project = getProject(req.params.id);
-  if (!project) return res.status(404).json({ error: 'not found' });
-  activateProject(project);
-  res.json({ ok: true });
-});
-
-app.post('/api/projects/:id/restore', (req, res) => {
-  const project = getProject(req.params.id);
+app.post('/api/projects/:id/restore', wrap(async (req, res) => {
+  const project = await getProject(req.params.id, req.userEmail);
   if (!project) return res.status(404).json({ error: 'not found' });
   const version = project.versions.find((v) => v.id === req.body?.versionId);
   if (!version) return res.status(404).json({ error: 'version not found' });
@@ -121,13 +126,12 @@ app.post('/api/projects/:id/restore', (req, res) => {
     versionId: restored.id,
     ts: Date.now(),
   });
-  saveProject(project);
-  activateProject(project);
+  await saveProject(project);
   res.json(project);
-});
+}));
 
-app.get('/api/projects/:id/export', (req, res) => {
-  const project = getProject(req.params.id);
+app.get('/api/projects/:id/export', wrap(async (req, res) => {
+  const project = await getProject(req.params.id, req.userEmail);
   if (!project) return res.status(404).json({ error: 'not found' });
 
   res.setHeader('Content-Type', 'application/zip');
@@ -137,26 +141,29 @@ app.get('/api/projects/:id/export', (req, res) => {
   for (const [filePath, content] of Object.entries(project.files)) {
     archive.append(content, { name: filePath });
   }
+  archive.append(JSON.stringify({ name: project.name, private: true, dependencies: project.dependencies }, null, 2), { name: 'package.json' });
   archive.append(
-    `# ${project.name}\n\nGenerated with Adorable (Lovable clone POC).\n\nFiles use React + Tailwind. Drop src/ into any Vite React template with Tailwind, entry component: src/App.jsx (default export).\n`,
+    `# ${project.name}\n\nGenerated with Adorable.\n\nReact + Tailwind app. Entry component: src/App.jsx (default export). Dependencies are listed in package.json.\n`,
     { name: 'README.md' }
   );
   archive.finalize();
-});
+}));
 
-app.post('/api/projects/:id/publish', async (req, res) => {
-  const project = getProject(req.params.id);
+app.post('/api/projects/:id/publish', wrap(async (req, res) => {
+  const project = await getProject(req.params.id, req.userEmail);
   if (!project) return res.status(404).json({ error: 'not found' });
   try {
     const { url } = await publishProject(project);
     project.publishedAt = Date.now();
-    saveProject(project);
+    await saveProject(project);
     res.json({ url });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
-});
+}));
 
+await init();
+console.log(`Storage: ${STORE_KIND}`);
 app.listen(PORT, () => {
   console.log(`Adorable server → http://localhost:${PORT}`);
 });

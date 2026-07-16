@@ -1,8 +1,11 @@
-# Adorable — a Lovable.com clone (POC)
+# Adorable — a Lovable.com clone
 
 Type a prompt → get a working multi-file React app → watch it render in a live, self-updating preview. Iterate through chat, browse the code, restore versions, export a zip, or publish a static build.
 
-No accounts/login — single-user local tool.
+Two modes:
+
+- **Local dev** (below): run it on your machine, identity is `DEV_USER`, projects stored as JSON on disk.
+- **Team deployment**: Docker Compose (app + Postgres) behind your company SSO proxy — every colleague gets their own projects and daily generation quota, and previews run in each user's browser (no generated code executes on the server). See **[DEPLOY.md](DEPLOY.md)**.
 
 ## Setup
 
@@ -32,12 +35,13 @@ Browser (builder UI, served at :3001)
  │      ◀──SSE stream (status/tokens/files)──┤
  │                                           │ calls OpenRouter → JSON file manifest
  │                                           ▼
- └─ preview iframe ◀──HMR── Vite runner (runner/, :5199) ◀── files written to runner/src/
+ └─ preview iframe ◀── Sandpack bundles the files IN THE BROWSER
+                       (per-user, concurrent, sandboxed)
 ```
 
-- **server/** — Express API. Calls OpenRouter (streaming), parses a JSON manifest of files, persists projects to `server/data/`, streams progress to the UI via SSE, writes the active project's files into the runner.
-- **runner/** — one pre-installed Vite + React app. Generated files land in its `src/`; Vite HMR updates the preview instantly. `src/main.jsx` is fixed; generated apps must export a default component from `src/App.jsx`.
-- **client/** — static builder UI (no build step): home screen + Lovable-style workspace (chat left, preview/code right).
+- **server/** — Express API. SSO-header identity, per-user projects + daily quotas, calls OpenRouter (streaming), parses a JSON manifest of files, persists to Postgres (`DATABASE_URL`) or disk, streams progress via SSE.
+- **client/** — static builder UI (no build step): home screen + Lovable-style workspace (chat left, preview/code right). The preview is a Sandpack client: generated files + their npm `dependencies` bundle in your browser.
+- **runner/** — pre-installed Vite + React app used **only** to `vite build` published projects (`/p/<id>/`). Bundling never executes generated app code.
 
 ## Features
 
