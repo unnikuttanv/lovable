@@ -1,15 +1,19 @@
-// Generation lifecycle: call model, parse manifest, update project, sync runner.
-// Each generation buffers its events so an SSE client can connect late and replay.
+// Generation lifecycle: quota check, call model, parse manifest, update project.
+// Preview execution happens in the user's browser (Sandpack) — the server never
+// runs generated code. Each generation buffers its events for SSE replay.
 import crypto from 'node:crypto';
 import { streamChat } from './openrouter.js';
 import { buildMessages } from './prompts.js';
-import { getProject, saveProject } from './store.js';
-import { activateProject, validateFilePath } from './runnerSync.js';
+import { getProject, saveProject, getUsage, incrementUsage } from './storage.js';
+import { validateFilePath } from './runnerSync.js';
 
-const generations = new Map(); // genId -> { events: [], subscribers: Set<fn>, finished: bool }
+const DAILY_LIMIT = Number(process.env.DAILY_GENERATION_LIMIT || 50);
+const generations = new Map(); // genId -> { owner, events: [], subscribers: Set<fn>, finished: bool }
 
-export function getGeneration(genId) {
-  return generations.get(genId) || null;
+export function getGeneration(genId, owner) {
+  const gen = generations.get(genId);
+  if (!gen || gen.owner !== owner) return null;
+  return gen;
 }
 
 function emit(gen, event, data) {
@@ -38,25 +42,30 @@ function currentFileFromPartial(text) {
   return last.match(/"path"\s*:\s*"([^"]+)"/)[1];
 }
 
-export function startGeneration(projectId, userPrompt) {
+export function startGeneration(projectId, userPrompt, owner) {
   const genId = crypto.randomUUID().slice(0, 12);
-  const gen = { events: [], subscribers: new Set(), finished: false };
+  const gen = { owner, events: [], subscribers: new Set(), finished: false };
   generations.set(genId, gen);
-  run(gen, projectId, userPrompt).catch((err) => {
+  run(gen, projectId, userPrompt, owner).catch((err) => {
     emit(gen, 'error', { message: err.message });
   });
-  // drop finished generations after 10 minutes
   setTimeout(() => generations.delete(genId), 10 * 60 * 1000).unref?.();
   return genId;
 }
 
-async function run(gen, projectId, userPrompt) {
-  const project = getProject(projectId);
+async function run(gen, projectId, userPrompt, owner) {
+  const project = await getProject(projectId, owner);
   if (!project) throw new Error('Project not found');
+
+  const used = await getUsage(owner);
+  if (used >= DAILY_LIMIT) {
+    throw new Error(`Daily limit of ${DAILY_LIMIT} generations reached — resets at midnight UTC.`);
+  }
+  await incrementUsage(owner);
 
   const messages = buildMessages(project, userPrompt);
   project.messages.push({ role: 'user', kind: 'chat', content: userPrompt, ts: Date.now() });
-  saveProject(project);
+  await saveProject(project);
 
   emit(gen, 'status', { stage: 'Calling ' + project.model });
 
@@ -91,7 +100,7 @@ async function run(gen, projectId, userPrompt) {
 
   if (manifest.type === 'chat') {
     project.messages.push({ role: 'assistant', kind: 'chat', content: manifest.message || '…', ts: Date.now() });
-    saveProject(project);
+    await saveProject(project);
     emit(gen, 'chat', { message: manifest.message });
     emit(gen, 'done', { versionId: null });
     return;
@@ -111,6 +120,11 @@ async function run(gen, projectId, userPrompt) {
   for (const del of manifest.deleted || []) {
     if (validateFilePath(del)) delete project.files[del.replaceAll('\\', '/')];
   }
+  if (manifest.dependencies && typeof manifest.dependencies === 'object') {
+    for (const [pkg, ver] of Object.entries(manifest.dependencies)) {
+      if (/^[a-z0-9@][a-z0-9._/@-]*$/i.test(pkg)) project.dependencies[pkg] = String(ver);
+    }
+  }
   if (!project.files['src/App.jsx']) throw new Error('Generated project is missing src/App.jsx');
 
   const version = {
@@ -127,8 +141,7 @@ async function run(gen, projectId, userPrompt) {
     versionId: version.id,
     ts: Date.now(),
   });
-  saveProject(project);
-  activateProject(project);
+  await saveProject(project);
 
   emit(gen, 'files', { paths: manifest.files.map((f) => f.path), summary: manifest.summary });
   emit(gen, 'done', { versionId: version.id });

@@ -1,8 +1,10 @@
-/* Adorable client — vanilla JS, no build step */
-const RUNNER_URL = 'http://localhost:5199/';
+/* Adorable client — vanilla JS module, no build step.
+   Preview runs entirely in this browser via Sandpack (no server-side execution). */
+import { loadSandpackClient } from 'https://esm.sh/@codesandbox/sandpack-client@2';
 
 const state = {
   view: 'home',
+  me: null, // { email, dailyLimit, usedToday }
   models: [],
   defaultModel: '',
   projects: [],
@@ -13,6 +15,8 @@ const state = {
   gen: null, // { stage, file, tail } while a generation is streaming
   publishing: false,
 };
+
+let sandpack = null; // active SandpackClient for the preview iframe
 
 const app = document.getElementById('app');
 const esc = (s) =>
@@ -37,6 +41,54 @@ async function api(path, opts = {}) {
   return data;
 }
 
+/* ---------------- Sandpack preview ---------------- */
+
+function sandpackFiles(project) {
+  const files = {
+    '/index.js': {
+      code: `import React from "react";
+import { createRoot } from "react-dom/client";
+import App from "./App.jsx";
+createRoot(document.getElementById("root")).render(<App />);`,
+    },
+    '/package.json': {
+      code: JSON.stringify({ name: 'adorable-app', main: '/index.js', dependencies: project.dependencies || {} }, null, 2),
+    },
+  };
+  for (const [p, content] of Object.entries(project.files)) {
+    if (p.startsWith('src/')) files['/' + p.slice(4)] = { code: content };
+  }
+  return files;
+}
+
+async function mountPreview() {
+  const iframe = document.getElementById('preview');
+  if (!iframe || !state.project) return;
+  destroyPreview();
+  try {
+    sandpack = await loadSandpackClient(
+      iframe,
+      { files: sandpackFiles(state.project), template: 'create-react-app' },
+      { showOpenInCodeSandbox: false, externalResources: ['https://cdn.tailwindcss.com'] }
+    );
+  } catch (err) {
+    console.error('Sandpack failed to start', err);
+  }
+}
+
+function destroyPreview() {
+  try { sandpack?.destroy(); } catch {}
+  sandpack = null;
+}
+
+function refreshPreview() {
+  if (sandpack && state.project) {
+    sandpack.updateSandbox({ files: sandpackFiles(state.project), template: 'create-react-app' });
+  } else {
+    mountPreview();
+  }
+}
+
 /* ---------------- home ---------------- */
 
 const EXAMPLES = [
@@ -49,11 +101,12 @@ const EXAMPLES = [
 
 function renderHome() {
   document.title = 'Adorable — build something adorable';
+  destroyPreview();
   app.innerHTML = `
     <div class="home">
       <nav class="topnav">
         <a class="logo" href="#"><span class="heart">🩷</span>Adorable</a>
-        <span class="hint">Lovable clone · proof of concept</span>
+        <span class="hint">${esc(state.me?.email || '')}</span>
       </nav>
       <section class="hero">
         <h1>Build something <em>adorable</em></h1>
@@ -81,7 +134,7 @@ function renderHome() {
                 (p) => `
               <div class="card" data-open="${p.id}">
                 <div class="name">${esc(p.name)}</div>
-                <div class="meta">${esc(p.model.split('/')[1] || p.model)} · ${ago(p.updatedAt)}${p.publishedAt ? ' · published' : ''}</div>
+                <div class="meta">${esc((p.model || '').split('/')[1] || p.model)} · ${ago(p.updatedAt)}${p.publishedAt ? ' · published' : ''}</div>
                 <button class="del" data-del="${p.id}" title="Delete project">✕</button>
               </div>`
               )
@@ -118,7 +171,9 @@ function renderWorkspace() {
   const p = state.project;
   document.title = `${p.name} — Adorable`;
   const versions = [...p.versions].reverse();
+  const quota = state.me ? `${state.me.usedToday}/${state.me.dailyLimit} today` : '';
 
+  destroyPreview();
   app.innerHTML = `
     <div class="ws">
       <header class="ws-top">
@@ -126,13 +181,14 @@ function renderWorkspace() {
         <a class="logo" href="#" id="home-link"><span class="heart">🩷</span></a>
         <input class="title" id="title" value="${esc(p.name)}" spellcheck="false" />
         <span class="spacer"></span>
+        <span class="hint" title="Signed in · generations used today">${esc(state.me?.email || '')} · ${esc(quota)}</span>
         ${p.publishedAt ? `<a class="pub-link" href="/p/${p.id}/" target="_blank">/p/${p.id}/ ↗</a>` : ''}
         <select class="ctl" id="history" title="Version history">
           <option value="">History (${versions.length})</option>
           ${versions.map((v) => `<option value="${v.id}">${esc(v.label)} · ${ago(v.ts)}</option>`).join('')}
         </select>
         <a class="btn" href="/api/projects/${p.id}/export" download>Export</a>
-        <button class="btn btn-primary" id="publish" ${state.publishing ? 'disabled' : ''}>${state.publishing ? 'Publishing…' : 'Publish'}</button>
+        <button class="btn btn-primary" id="publish" ${state.publishing ? 'disabled' : ''} title="Static build; supports the default dependencies only">${state.publishing ? 'Publishing…' : 'Publish'}</button>
       </header>
       <div class="ws-main">
         <aside class="chat">
@@ -157,18 +213,18 @@ function renderWorkspace() {
               <button class="icon-btn ${state.device === 'desktop' ? 'active' : ''}" data-device="desktop" title="Desktop width">🖥</button>
               <button class="icon-btn ${state.device === 'tablet' ? 'active' : ''}" data-device="tablet" title="Tablet width">▯</button>
               <button class="icon-btn ${state.device === 'phone' ? 'active' : ''}" data-device="phone" title="Phone width">▮</button>
-              <button class="icon-btn" id="reload" title="Reload preview">⟳</button>
-              <a class="icon-btn" href="${RUNNER_URL}" target="_blank" title="Open preview in a new tab">↗</a>`
+              <button class="icon-btn" id="reload" title="Reload preview">⟳</button>`
               : ''}
           </div>
           ${state.tab === 'preview'
-            ? `<div class="preview-wrap ${state.device}"><iframe id="preview" src="${RUNNER_URL}" title="Live preview"></iframe></div>`
+            ? `<div class="preview-wrap ${state.device}"><iframe id="preview" title="Live preview"></iframe></div>`
             : renderCode(p)}
         </main>
       </div>
     </div>`;
 
   wireWorkspace(p);
+  if (state.tab === 'preview' && Object.keys(p.files).length) mountPreview();
   const log = document.getElementById('chat-log');
   log.scrollTop = log.scrollHeight;
 }
@@ -224,7 +280,6 @@ function wireWorkspace(p) {
     if (!confirm('Restore this version? The preview will update to match.')) { e.target.value = ''; return; }
     state.project = await api(`/api/projects/${p.id}/restore`, { method: 'POST', body: { versionId } });
     renderWorkspace();
-    reloadPreview();
   };
 
   document.getElementById('publish').onclick = async () => {
@@ -256,13 +311,8 @@ function wireWorkspace(p) {
   app.querySelectorAll('[data-tab]').forEach((t) => (t.onclick = () => { state.tab = t.dataset.tab; renderWorkspace(); }));
   app.querySelectorAll('[data-device]').forEach((d) => (d.onclick = () => { state.device = d.dataset.device; renderWorkspace(); }));
   const reload = document.getElementById('reload');
-  if (reload) reload.onclick = reloadPreview;
+  if (reload) reload.onclick = refreshPreview;
   app.querySelectorAll('[data-file]').forEach((f) => (f.onclick = () => { state.selectedFile = f.dataset.file; renderWorkspace(); }));
-}
-
-function reloadPreview() {
-  const frame = document.getElementById('preview');
-  if (frame) frame.src = RUNNER_URL + '?t=' + Date.now();
 }
 
 function pushLocalError(message) {
@@ -273,12 +323,21 @@ function pushLocalError(message) {
 /* ---------------- actions ---------------- */
 
 async function loadHome() {
-  const [{ models, default: def }, projects] = await Promise.all([api('/api/models'), api('/api/projects')]);
-  state.models = models;
-  state.defaultModel = def;
-  state.projects = projects;
-  state.view = 'home';
-  renderHome();
+  try {
+    const [me, { models, default: def }, projects] = await Promise.all([
+      api('/api/me'),
+      api('/api/models'),
+      api('/api/projects'),
+    ]);
+    state.me = me;
+    state.models = models;
+    state.defaultModel = def;
+    state.projects = projects;
+    state.view = 'home';
+    renderHome();
+  } catch (err) {
+    app.innerHTML = `<div class="home"><section class="hero"><h1>Adorable</h1><p class="sub">${esc(err.message)}</p></section></div>`;
+  }
 }
 
 function goHome() {
@@ -292,9 +351,7 @@ async function openProject(id) {
   state.view = 'workspace';
   state.tab = 'preview';
   state.selectedFile = null;
-  await api(`/api/projects/${id}/activate`, { method: 'POST' }).catch(() => {});
   renderWorkspace();
-  setTimeout(reloadPreview, 400);
 }
 
 async function createProject(prompt, model) {
@@ -310,9 +367,13 @@ async function createProject(prompt, model) {
 async function sendMessage(prompt) {
   const p = state.project;
   p.messages.push({ role: 'user', kind: 'chat', content: prompt, ts: Date.now() });
-  const { generationId } = await api(`/api/projects/${p.id}/messages`, { method: 'POST', body: { prompt } });
-  openStream(generationId);
-  renderWorkspace();
+  try {
+    const { generationId } = await api(`/api/projects/${p.id}/messages`, { method: 'POST', body: { prompt } });
+    openStream(generationId);
+    renderWorkspace();
+  } catch (err) {
+    pushLocalError(err.message);
+  }
 }
 
 function openStream(generationId) {
@@ -349,9 +410,10 @@ function openStream(generationId) {
   es.addEventListener('done', async () => {
     es.close();
     state.gen = null;
-    state.project = await api(`/api/projects/${state.project.id}`);
+    const [project, me] = await Promise.all([api(`/api/projects/${state.project.id}`), api('/api/me')]);
+    state.project = project;
+    state.me = me;
     renderWorkspace();
-    reloadPreview();
   });
   es.addEventListener('error', (e) => {
     es.close();
