@@ -7,3 +7,5 @@ runner/src/*
 !runner/src/main.jsx
 !runner/src/App.jsx
 .gstack/
+
+.env
