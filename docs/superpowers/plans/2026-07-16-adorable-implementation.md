@@ -1,5 +1,7 @@
 # Adorable (Lovable Clone POC) Implementation Plan
 
+> **Superseded:** implements the retired Node backend — see 2026-07-17-python-langgraph-design.md for the current architecture.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** A local prompt-to-app builder: prompts become multi-file React apps rendered in a live self-updating preview, with chat iteration, versions, export, and publish.

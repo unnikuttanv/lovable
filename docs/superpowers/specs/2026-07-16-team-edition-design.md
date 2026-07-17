@@ -1,5 +1,7 @@
 # Adorable Team Edition — Production Design Spec
 
+> **Superseded in part:** Sandpack/SSO/quotas/Postgres remain current; the Node server was replaced by pyserver/ — see 2026-07-17-python-langgraph-design.md.
+
 **Date:** 2026-07-16
 **Builds on:** 2026-07-16-adorable-design.md (POC). Approved scope: multi-user company deployment; Sandpack preview, SSO-header identity, Postgres, quotas, Docker.
 

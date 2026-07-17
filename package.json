@@ -4,11 +4,7 @@
   "version": "0.1.0",
   "description": "Lovable.com clone POC - prompts to live React apps",
   "scripts": {
-    "install:all": "npm install && npm --prefix runner install && python -m venv pyserver/.venv && pyserver/.venv/Scripts/python -m pip install -r pyserver/requirements.txt",
-    "dev": "pyserver/.venv/Scripts/python -m uvicorn app.main:app --app-dir pyserver --port 3001",
-    "dev:node-legacy": "concurrently -n server,runner -c blue,magenta \"npm --prefix server run dev\" \"npm --prefix runner run dev\""
-  },
-  "devDependencies": {
-    "concurrently": "^9.0.0"
+    "install:all": "npm --prefix runner install && python -m venv pyserver/.venv && pyserver/.venv/Scripts/python -m pip install -r pyserver/requirements.txt",
+    "dev": "pyserver/.venv/Scripts/python -m uvicorn app.main:app --app-dir pyserver --port 3001"
   }
 }

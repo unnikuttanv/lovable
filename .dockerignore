@@ -1,8 +1,8 @@
 **/node_modules
 .git
 docs
-server
 pyserver/.venv
+pyserver/data
 pyserver/published
 pyserver/.env
 **/__pycache__

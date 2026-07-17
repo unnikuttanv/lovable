@@ -13,7 +13,7 @@ Two modes:
 npm run install:all
 ```
 
-Put your OpenRouter key in `server/.env`:
+Put your OpenRouter key in `pyserver/.env` (copy `pyserver/.env.example`):
 
 ```
 OPENROUTER_API_KEY=sk-or-...
@@ -43,8 +43,7 @@ Browser (builder UI, served at :3001)
 
 - **pyserver/** — FastAPI + LangChain/LangGraph backend. Each prompt runs a staged agent pipeline: **plan()** (build plan, or a clarifying question via a checkpointed `interrupt()` that your next chat message resumes, or a plain chat reply), **architect()** (file layout + npm dependencies), **coder()** (full file contents, streamed). SSO-header identity, per-user projects + daily quotas, Postgres (`DATABASE_URL`) or disk persistence.
 - **client/** — static builder UI (no build step): home screen + Lovable-style workspace (chat left, preview/code right). The preview is a Sandpack client: generated files + their npm `dependencies` bundle in your browser.
-- **runner/** — pre-installed Vite + React app used **only** to `vite build` published projects (`/p/<id>/`). Bundling never executes generated app code.
-- **server/** — the retired Node backend, kept for reference (`npm run dev:node-legacy`).
+- **runner/** — pre-installed Vite + React app used **only** to `vite build` published projects (`/p/<id>/`). Bundling never executes generated app code, and project-declared npm packages are installed with `--ignore-scripts`.
 
 ## Features
 
@@ -56,8 +55,9 @@ Browser (builder UI, served at :3001)
 - Export as zip, publish static build at `/p/<id>/`
 - Model picker (any common model via OpenRouter)
 
-## POC tradeoffs
+## Current limitations
 
-- Generated apps may only import `react`, `react-dom`, `lucide-react`; styling via Tailwind utility classes (Tailwind Play CDN script, self-hosted copy in `runner/public/`).
-- Projects are JSON on disk; generations are in-memory during streaming.
-- One preview at a time (shared runner) — switching projects swaps files.
+- A pending clarification (paused graph) lives in an in-memory checkpointer — it does not survive a server restart; just re-send the prompt. (Upgrade path: LangGraph's Postgres checkpointer.)
+- Publish builds share one runner: two projects pinning conflicting versions of the same npm package overwrite each other sequentially.
+- The Sandpack preview fetches npm packages from CodeSandbox's CDN, so users' browsers need internet access.
+- Each generation costs ~N+2 model calls for an N-file app (plan + architect + one per file).
