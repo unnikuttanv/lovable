@@ -48,6 +48,15 @@ Dev: root `npm run dev` now starts uvicorn (port 3001). Docker: `python:3.12-sli
 ## Error handling
 Per-node JSON retry then readable SSE error; OpenRouter/httpx errors surfaced verbatim; quota and auth behavior identical to team edition.
 
+## v1.1 — coder-buddy refinements (2026-07-17, implemented)
+
+Adopted from codebasics/coder-buddy for explainability and robustness:
+
+- **Typed agent contracts** (`agents/states.py`): `PlanResult`, `ImplementationTask`, `TaskPlan` pydantic models; LLM JSON is validated with `model_validate` and the exact validation error is fed back on the single retry.
+- **Architect emits an ordered task queue** (one task per file, dependencies first, with per-file implementation descriptions), plus summary/dependencies/deleted.
+- **Coder loops one LLM call per task**, returning the file's **raw content** (no JSON escaping failure mode; markdown fences stripped defensively). Per-file progress streams over LangGraph's custom channel → ticker shows "Writing src/X (2/6)".
+Not adopted: Groq-only LLM config (we keep OpenRouter multi-model) and the ReACT filesystem-tools coder (server-side file writes are exactly what the Sandpack architecture eliminates).
+
 ## Out of scope (v1)
 Postgres checkpointer for paused graphs; per-node model selection; parallel coder fan-out per file; evaluation loops (validate/fix cycles).
 
