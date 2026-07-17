@@ -1,17 +1,22 @@
-FROM node:22-alpine
+FROM python:3.12-slim
+
+# Node is needed only for `vite build` when publishing (bundles, never executes app code)
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends nodejs npm \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
-COPY server/package*.json server/
-RUN npm ci --prefix server --omit=dev
+COPY pyserver/requirements.txt pyserver/
+RUN pip install --no-cache-dir -r pyserver/requirements.txt
 
-# runner needs devDependencies (vite) — it is the publish build engine
 COPY runner/package*.json runner/
 RUN npm ci --prefix runner
 
-COPY server server
+COPY pyserver pyserver
 COPY runner runner
 COPY client client
 
-ENV NODE_ENV=production PORT=3001
+ENV PORT=3001
 EXPOSE 3001
-CMD ["node", "server/src/index.js"]
+CMD ["python", "-m", "uvicorn", "app.main:app", "--app-dir", "pyserver", "--host", "0.0.0.0", "--port", "3001"]

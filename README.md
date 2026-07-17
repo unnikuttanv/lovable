@@ -31,17 +31,20 @@ Open **http://localhost:3001**.
 
 ```
 Browser (builder UI, served at :3001)
- ├─ chat panel ──POST prompt──▶ Express API (server/, :3001)
- │      ◀──SSE stream (status/tokens/files)──┤
- │                                           │ calls OpenRouter → JSON file manifest
- │                                           ▼
+ ├─ chat panel ──POST prompt──▶ FastAPI (pyserver/, :3001)
+ │      ◀──SSE (stages/tokens/files)──┤
+ │                                    │  LangGraph pipeline (via OpenRouter):
+ │                                    │  plan() ─┬─▶ architect() ─▶ coder()
+ │                                    │          └─▶ clarify() = interrupt(),
+ │                                    │              resumes on your next message
  └─ preview iframe ◀── Sandpack bundles the files IN THE BROWSER
                        (per-user, concurrent, sandboxed)
 ```
 
-- **server/** — Express API. SSO-header identity, per-user projects + daily quotas, calls OpenRouter (streaming), parses a JSON manifest of files, persists to Postgres (`DATABASE_URL`) or disk, streams progress via SSE.
+- **pyserver/** — FastAPI + LangChain/LangGraph backend. Each prompt runs a staged agent pipeline: **plan()** (build plan, or a clarifying question via a checkpointed `interrupt()` that your next chat message resumes, or a plain chat reply), **architect()** (file layout + npm dependencies), **coder()** (full file contents, streamed). SSO-header identity, per-user projects + daily quotas, Postgres (`DATABASE_URL`) or disk persistence.
 - **client/** — static builder UI (no build step): home screen + Lovable-style workspace (chat left, preview/code right). The preview is a Sandpack client: generated files + their npm `dependencies` bundle in your browser.
 - **runner/** — pre-installed Vite + React app used **only** to `vite build` published projects (`/p/<id>/`). Bundling never executes generated app code.
+- **server/** — the retired Node backend, kept for reference (`npm run dev:node-legacy`).
 
 ## Features
 
