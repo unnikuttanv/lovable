@@ -1,5 +1,7 @@
 # Adorable — a Lovable.com clone (POC) — Design Spec
 
+> **Superseded:** the Node backend described here was replaced by pyserver/ — see 2026-07-17-python-langgraph-design.md.
+
 **Date:** 2026-07-16
 **Status:** Approved scope: "everything real Lovable does, minus user accounts/login."
 

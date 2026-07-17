@@ -1,4 +1,4 @@
-"""Env + paths. Loads pyserver/.env first, then server/.env (legacy location) as fallback."""
+"""Env + paths. Config comes from pyserver/.env (or real env vars in Docker)."""
 import os
 from pathlib import Path
 from dotenv import load_dotenv
@@ -7,11 +7,10 @@ PYSERVER_DIR = Path(__file__).resolve().parent.parent
 REPO_DIR = PYSERVER_DIR.parent
 CLIENT_DIR = REPO_DIR / "client"
 RUNNER_DIR = REPO_DIR / "runner"
-DATA_DIR = REPO_DIR / "server" / "data"  # reuse existing project data
+DATA_DIR = PYSERVER_DIR / "data"
 PUBLISHED_DIR = PYSERVER_DIR / "published"
 
 load_dotenv(PYSERVER_DIR / ".env")
-load_dotenv(REPO_DIR / "server" / ".env")  # does not override already-set vars
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"

@@ -1,5 +1,7 @@
 # Adorable Team Edition Implementation Plan
 
+> **Superseded in part:** the Node server tasks were replaced by pyserver/ — see 2026-07-17-python-langgraph-design.md.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Turn the single-user POC into a multi-user, company-deployable service per `2026-07-16-team-edition-design.md`.
