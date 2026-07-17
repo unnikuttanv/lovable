@@ -1,8 +1,10 @@
 **/node_modules
 .git
 docs
-server/data
-server/published
-server/.env
+server
+pyserver/.venv
+pyserver/published
+pyserver/.env
+**/__pycache__
 runner/dist
 .gstack
