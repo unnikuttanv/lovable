@@ -9,3 +9,7 @@ runner/src/*
 .gstack/
 
 .env
+pyserver/.venv/
+pyserver/.env
+pyserver/published/
+__pycache__/
