@@ -188,7 +188,7 @@ function renderWorkspace() {
           ${versions.map((v) => `<option value="${v.id}">${esc(v.label)} · ${ago(v.ts)}</option>`).join('')}
         </select>
         <a class="btn" href="/api/projects/${p.id}/export" download>Export</a>
-        <button class="btn btn-primary" id="publish" ${state.publishing ? 'disabled' : ''} title="Static build; supports the default dependencies only">${state.publishing ? 'Publishing…' : 'Publish'}</button>
+        <button class="btn btn-primary" id="publish" ${state.publishing ? 'disabled' : ''} title="Build a static version served at /p/<id>/">${state.publishing ? 'Publishing…' : 'Publish'}</button>
       </header>
       <div class="ws-main">
         <aside class="chat">

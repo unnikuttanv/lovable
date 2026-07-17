@@ -91,7 +91,9 @@ Run the stack on a machine in your tailnet, share the machine to the team, set
 
 - Generated code **never executes on the server**. Previews bundle and run in each
   user's browser (Sandpack, sandboxed iframe). Publish runs `vite build`, which
-  bundles but does not execute app code.
+  bundles but does not execute app code; extra npm packages a project declares are
+  installed on demand with `--ignore-scripts`, so package install hooks don't run
+  either.
 - Identity is only as trustworthy as your network path: the SSO proxy must be the
   only way to reach the app.
 - Users are isolated per email: they can only list/read/modify their own projects.
