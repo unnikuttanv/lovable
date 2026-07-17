@@ -13,7 +13,6 @@ from .config import DAILY_GENERATION_LIMIT
 from . import storage
 
 _PKG_RE = re.compile(r"^[a-z0-9@][a-z0-9._/@-]*$", re.I)
-_FILE_IN_PARTIAL_RE = re.compile(r'"path"\s*:\s*"([^"]+)"')
 
 generations: dict[str, "Generation"] = {}
 
@@ -103,15 +102,21 @@ def _run(gen, project_id, prompt, owner, thread_id, is_resume):
     acc = ""
     last_token = 0.0
     current_node = "plan"
+    current_file = None  # set by the coder's per-task custom events
 
-    for mode, chunk in graph.stream(graph_input, config, stream_mode=["messages", "updates"]):
-        if mode == "messages":
+    for mode, chunk in graph.stream(graph_input, config, stream_mode=["messages", "updates", "custom"]):
+        if mode == "custom" and isinstance(chunk, dict) and chunk.get("file"):
+            current_file = f"{chunk['file']} ({chunk.get('index')}/{chunk.get('total')})"
+            acc = ""
+            gen.emit("status", {"stage": f"Writing {current_file}"})
+        elif mode == "messages":
             msg, meta = chunk
             node = meta.get("langgraph_node") or current_node
             if node != current_node:
                 current_node = node
                 acc = ""
-                gen.emit("status", {"stage": STAGE_LABELS.get(node, node)})
+                if node != "coder":  # coder stages come from its per-file custom events
+                    gen.emit("status", {"stage": STAGE_LABELS.get(node, node)})
             text = msg.content if isinstance(msg.content, str) else ""
             if not text:
                 continue
@@ -119,11 +124,8 @@ def _run(gen, project_id, prompt, owner, thread_id, is_resume):
             now = time.monotonic()
             if now - last_token >= 0.1:
                 last_token = now
-                match = None
-                if current_node == "coder":
-                    hits = _FILE_IN_PARTIAL_RE.findall(acc)
-                    match = hits[-1] if hits else None
-                gen.emit("token", {"text": acc[-400:], "file": match, "chars": len(acc)})
+                file_label = current_file if current_node == "coder" else None
+                gen.emit("token", {"text": acc[-400:], "file": file_label, "chars": len(acc)})
         elif mode == "updates" and "__interrupt__" in chunk:
             question = _interrupt_question(chunk["__interrupt__"])
             _pause_for_clarification(gen, project_id, owner, thread_id, question)

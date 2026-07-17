@@ -1,24 +1,29 @@
 """LangGraph pipeline: plan -> (clarify -> plan) | chat | architect -> coder.
 
-The graph is compiled once with an in-memory checkpointer; each generation runs
-under a thread_id. clarify() uses interrupt() so the graph pauses until the
-user's next chat message resumes it with their answer.
+coder-buddy-style refinements: agents exchange pydantic models (states.py), the
+architect emits an ordered task queue, and the coder implements ONE file per LLM
+call returning raw code (no JSON escaping to go wrong). Per-file progress is
+pushed through LangGraph's custom stream channel.
 """
 import json
 import re
-from typing import TypedDict
+from typing import Optional, TypedDict
 
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.config import get_stream_writer
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import interrupt
+from pydantic import BaseModel, ValidationError
 
 from ..config import OPENROUTER_API_KEY, OPENROUTER_BASE_URL
-from .prompts import PLAN_PROMPT, ARCHITECT_PROMPT, CODER_PROMPT
+from .prompts import PLAN_PROMPT, ARCHITECT_PROMPT, CODER_FILE_PROMPT
+from .states import PlanResult, TaskPlan
 
 HISTORY_LIMIT = 12
 HISTORY_TRUNCATE = 2000
 _PATH_RE = re.compile(r"^src/(?!main\.jsx$)[^\0]*$")
+_FENCE_RE = re.compile(r"^\s*```[\w.+-]*\s*\n|\n?```\s*$")
 
 
 class BuildState(TypedDict, total=False):
@@ -30,8 +35,8 @@ class BuildState(TypedDict, total=False):
     plan: str
     chat_reply: str
     clarify_question: str
-    architecture: dict   # {"files": [...], "dependencies": {...}}
-    manifest: dict       # {"files": [...], "deleted": [...], "summary": ...}
+    task_plan: dict      # TaskPlan.model_dump()
+    manifest: dict       # {"files": [...], "deleted": [...], "dependencies": ..., "summary": ...}
 
 
 def valid_path(p) -> bool:
@@ -51,6 +56,16 @@ def _llm(model: str) -> ChatOpenAI:
     )
 
 
+def _base_messages(state: BuildState, system: str) -> list:
+    messages = [{"role": "system", "content": system}]
+    for m in state.get("history", [])[-HISTORY_LIMIT:]:
+        content = m["content"]
+        if len(content) > HISTORY_TRUNCATE:
+            content = content[:HISTORY_TRUNCATE] + "\n…(truncated)"
+        messages.append({"role": "user" if m["role"] == "user" else "assistant", "content": content})
+    return messages
+
+
 def _extract_json(text: str) -> dict:
     start, end = text.find("{"), text.rfind("}")
     if start == -1 or end <= start:
@@ -58,26 +73,20 @@ def _extract_json(text: str) -> dict:
     return json.loads(text[start : end + 1])
 
 
-def _call_json(state: BuildState, system: str, user: str) -> dict:
-    """One LLM call expected to return JSON; single corrective retry on parse failure."""
+def _call_validated(state: BuildState, system: str, user: str, model_cls: type[BaseModel]) -> BaseModel:
+    """LLM call whose reply must validate against a pydantic model.
+    One corrective retry carrying the exact parse/validation error back to the model."""
     llm = _llm(state["model"])
-    messages = [{"role": "system", "content": system}]
-    for m in state.get("history", [])[-HISTORY_LIMIT:]:
-        content = m["content"]
-        if len(content) > HISTORY_TRUNCATE:
-            content = content[:HISTORY_TRUNCATE] + "\n…(truncated)"
-        messages.append({"role": "user" if m["role"] == "user" else "assistant", "content": content})
-    messages.append({"role": "user", "content": user})
-
+    messages = _base_messages(state, system) + [{"role": "user", "content": user}]
     raw = llm.invoke(messages).content
     try:
-        return _extract_json(raw)
-    except (ValueError, json.JSONDecodeError):
+        return model_cls.model_validate(_extract_json(raw))
+    except (ValueError, json.JSONDecodeError, ValidationError) as err:
         retry = messages + [
             {"role": "assistant", "content": raw[:8000]},
-            {"role": "user", "content": "Your previous reply was not valid JSON. Respond again with ONLY the JSON object, exactly per the format rules."},
+            {"role": "user", "content": f"Your previous reply was invalid: {err}\nRespond again with ONLY the corrected JSON object, exactly per the format rules."},
         ]
-        return _extract_json(llm.invoke(retry).content)
+        return model_cls.model_validate(_extract_json(llm.invoke(retry).content))
 
 
 def _files_block(files: dict) -> str:
@@ -92,15 +101,13 @@ def plan_node(state: BuildState) -> BuildState:
     user += f"User request: {state['prompt']}"
     if state.get("clarification_answer"):
         user += f"\n\nClarification answer from the user: {state['clarification_answer']}"
-    result = _call_json(state, PLAN_PROMPT, user)
+    result: PlanResult = _call_validated(state, PLAN_PROMPT, user, PlanResult)
 
-    mode = result.get("mode")
-    if mode == "clarify" and not state.get("clarification_answer"):
-        return {"clarify_question": result.get("question") or "Could you describe what you want in a bit more detail?"}
-    if mode == "chat":
-        return {"chat_reply": result.get("reply") or "…", "clarify_question": ""}
-    plan = result.get("plan") or result.get("question") or state["prompt"]
-    return {"plan": plan, "clarify_question": ""}
+    if result.mode == "clarify" and not state.get("clarification_answer"):
+        return {"clarify_question": result.question or "Could you describe what you want in a bit more detail?"}
+    if result.mode == "chat":
+        return {"chat_reply": result.reply or "…", "clarify_question": ""}
+    return {"plan": result.plan or state["prompt"], "clarify_question": ""}
 
 
 def clarify_node(state: BuildState) -> BuildState:
@@ -120,33 +127,46 @@ def architect_node(state: BuildState) -> BuildState:
     file_list = "\n".join(f"- {p}" for p in state.get("files", {})) or "(none — new project)"
     user = (
         f"Build plan:\n{state['plan']}\n\nExisting project files:\n{file_list}\n\n"
-        "Design the architecture."
+        "Design the task queue."
     )
-    result = _call_json(state, ARCHITECT_PROMPT, user)
-    files = [f for f in result.get("files", []) if isinstance(f, dict) and valid_path(f.get("path"))]
-    if not files:
-        raise ValueError("Architect produced no valid files")
-    deps = result.get("dependencies") or {}
-    return {"architecture": {"files": files, "dependencies": deps}}
+    task_plan: TaskPlan = _call_validated(state, ARCHITECT_PROMPT, user, TaskPlan)
+    return {"task_plan": task_plan.model_dump()}
 
 
 def coder_node(state: BuildState) -> BuildState:
-    arch = state["architecture"]
-    arch_lines = "\n".join(f"- {f['path']}: {f.get('purpose', '')}" for f in arch["files"])
-    deps_line = json.dumps(arch.get("dependencies") or {})
-    user = _files_block(state.get("files", {}))
-    user += (
-        f"Build plan:\n{state['plan']}\n\n"
-        f"Architecture (implement exactly these files):\n{arch_lines}\n\n"
-        f"Extra npm dependencies you may import: {deps_line}\n\n"
-        f"Original user request: {state['prompt']}"
-    )
-    manifest = _call_json(state, CODER_PROMPT, user)
-    if not isinstance(manifest.get("files"), list):
-        raise ValueError("Coder returned an unexpected manifest shape")
-    manifest.setdefault("deleted", [])
-    manifest["dependencies"] = arch.get("dependencies") or {}
-    return {"manifest": manifest}
+    """One focused LLM call per task; the reply is the file's raw content."""
+    task_plan = TaskPlan.model_validate(state["task_plan"])
+    writer = get_stream_writer()
+    llm = _llm(state["model"])
+
+    queue_text = "\n".join(f"{i + 1}. {t.path} — {t.description}" for i, t in enumerate(task_plan.tasks))
+    deps_line = json.dumps(task_plan.dependencies)
+    working_files = dict(state.get("files", {}))
+    written = []
+
+    for i, task in enumerate(task_plan.tasks):
+        writer({"file": task.path, "index": i + 1, "total": len(task_plan.tasks)})
+        user = _files_block(working_files)
+        user += (
+            f"Build plan:\n{state['plan']}\n\n"
+            f"Full task queue (context):\n{queue_text}\n\n"
+            f"Declared extra npm dependencies: {deps_line}\n\n"
+            f"YOUR TASK — write the complete content of {task.path}:\n{task.description}"
+        )
+        messages = _base_messages(state, CODER_FILE_PROMPT) + [{"role": "user", "content": user}]
+        content = llm.invoke(messages).content
+        content = _FENCE_RE.sub("", content).strip("\n") + "\n"
+        working_files[task.path] = content
+        written.append({"path": task.path, "content": content})
+
+    return {
+        "manifest": {
+            "files": written,
+            "deleted": [d for d in task_plan.deleted if valid_path(d)],
+            "dependencies": task_plan.dependencies,
+            "summary": task_plan.summary,
+        }
+    }
 
 
 def build_graph():
