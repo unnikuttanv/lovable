@@ -12,7 +12,8 @@ from .agents.graph import graph, STAGE_LABELS, valid_path
 from .config import DAILY_GENERATION_LIMIT
 from . import storage
 
-_PKG_RE = re.compile(r"^[a-z0-9@][a-z0-9._/@-]*$", re.I)
+_PKG_RE = re.compile(r"^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$")
+_VER_RE = re.compile(r"^[A-Za-z0-9.+_\-~^><=* ]{1,64}$")
 
 generations: dict[str, "Generation"] = {}
 
@@ -177,7 +178,7 @@ def _finish(gen, project_id, owner, state):
         if valid_path(deleted):
             project["files"].pop(deleted.replace("\\", "/"), None)
     for pkg, ver in (manifest.get("dependencies") or {}).items():
-        if _PKG_RE.match(pkg):
+        if _PKG_RE.match(pkg) and _VER_RE.match(str(ver)):
             project.setdefault("dependencies", {})[pkg] = str(ver)
     if "src/App.jsx" not in project["files"]:
         raise RuntimeError("Generated project is missing src/App.jsx")

@@ -2,6 +2,7 @@
 Builds are serialized (shared runner src/); bundling does not execute app code.
 Extra npm dependencies a project declares are installed into the runner on demand
 with --ignore-scripts, so no package lifecycle code runs either."""
+import re
 import shutil
 import subprocess
 import threading
@@ -11,6 +12,14 @@ from .config import RUNNER_DIR, PUBLISHED_DIR
 _lock = threading.Lock()
 _FIXED = {"main.jsx"}
 RUNNER_SRC = RUNNER_DIR / "src"
+
+# LLM-derived strings must never reach a shell. Specs are strictly validated AND
+# passed as argv — on Windows npm resolves to npm.cmd, which cmd.exe still parses,
+# so the regexes are the primary defense, argv the second layer.
+_SPEC_RE = re.compile(r"^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$")
+_VER_RE = re.compile(r"^[A-Za-z0-9.+_\-~^><=* ]{1,64}$")
+_NPM = shutil.which("npm") or "npm"
+_NPX = shutil.which("npx") or "npx"
 
 
 def _activate(project):
@@ -38,11 +47,15 @@ def _ensure_dependencies(project):
     }
     if not missing:
         return
-    specs = " ".join(f'"{pkg}@{ver}"' for pkg, ver in missing.items())
+    args = [_NPM, "install", "--no-save", "--ignore-scripts", "--"]
+    for pkg, ver in missing.items():
+        if not _SPEC_RE.match(pkg) or not _VER_RE.match(str(ver)):
+            raise RuntimeError(f"Invalid dependency spec: {pkg}@{ver}")
+        args.append(f"{pkg}@{ver}")
     result = subprocess.run(
-        f"npm install --no-save --ignore-scripts {specs}",
+        args,
         cwd=RUNNER_DIR,
-        shell=True,
+        shell=False,
         capture_output=True,
         text=True,
         timeout=300,
@@ -52,14 +65,17 @@ def _ensure_dependencies(project):
 
 
 def publish_project(project) -> str:
+    pid = project["id"]
+    if not re.match(r"^[a-z0-9-]+$", pid):
+        raise RuntimeError("Invalid project id")
     with _lock:
         _ensure_dependencies(project)
         _activate(project)
-        out_dir = PUBLISHED_DIR / project["id"]
+        out_dir = PUBLISHED_DIR / pid
         result = subprocess.run(
-            f'npx vite build --base=/p/{project["id"]}/ --outDir "{out_dir}" --emptyOutDir',
+            [_NPX, "vite", "build", f"--base=/p/{pid}/", "--outDir", str(out_dir), "--emptyOutDir"],
             cwd=RUNNER_DIR,
-            shell=True,
+            shell=False,
             capture_output=True,
             text=True,
             timeout=300,
