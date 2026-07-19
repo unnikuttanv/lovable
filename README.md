@@ -49,9 +49,9 @@ Browser (builder UI, served at :3001)
 
 ## Features
 
-- Prompt → multi-file React app (model returns `{"type":"code","files":[...]}`)
-- Conversational mode: ambiguous prompts get a clarifying question instead of code
-- Iterative edits (model returns only changed files)
+- Prompt → multi-file React app via the plan → architect → coder agent pipeline, with per-file build progress
+- Human-in-the-loop: ambiguous prompts pause with a clarifying question; your answer resumes the same run
+- Iterative edits (only the files that change are regenerated)
 - Live preview with device-width toggle, code view with file tree
 - Version history with restore
 - Export as zip, publish static build at `/p/<id>/`

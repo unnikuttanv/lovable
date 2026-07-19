@@ -45,7 +45,7 @@ def valid_path(p) -> bool:
 
 def _llm(model: str) -> ChatOpenAI:
     if not OPENROUTER_API_KEY or "your-key-here" in OPENROUTER_API_KEY:
-        raise RuntimeError("OPENROUTER_API_KEY is not set. Add it to server/.env or pyserver/.env")
+        raise RuntimeError("OPENROUTER_API_KEY is not set. Add it to pyserver/.env")
     return ChatOpenAI(
         model=model,
         api_key=OPENROUTER_API_KEY,
