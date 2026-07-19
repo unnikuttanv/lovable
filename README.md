@@ -9,6 +9,8 @@ Two modes:
 
 ## Setup
 
+Prerequisites: Node 18+ and Python 3.11+ on your PATH.
+
 ```bash
 npm run install:all
 ```
