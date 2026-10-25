@@ -5,7 +5,18 @@ Type a prompt → get a working multi-file React app → watch it render in a li
 Two modes:
 
 - **Local dev** (below): run it on your machine, identity is `DEV_USER`, projects stored as JSON on disk.
-- **Team deployment**: Docker Compose (app + Postgres) behind your company SSO proxy — every colleague gets their own projects and daily generation quota, and previews run in each user's browser (no generated code executes on the server). See **[DEPLOY.md](DEPLOY.md)**.
+- **Team deployment**: Docker Compose (app + Postgres) behind an SSO proxy (Cloudflare Access, oauth2-proxy, Tailscale) — every user gets their own projects and daily generation quota, and previews run in each user's browser (no generated code executes on the server). See **[DEPLOY.md](DEPLOY.md)**.
+
+## Who it's for
+
+Developers and small teams who want a self-hosted, model-agnostic alternative to Lovable.dev — prototype front-end apps from a prompt without sending projects to a third-party builder, and keep control of which LLM is used and what it costs.
+
+## Built with
+
+- **Backend:** Python 3.11+, FastAPI, LangChain + LangGraph (plan → architect → coder agents), OpenRouter, SSE streaming, Postgres or JSON-on-disk storage
+- **Frontend:** static HTML/JS builder UI, Sandpack in-browser bundling for the live preview
+- **Publishing:** Vite + React runner for static builds
+- **Ops:** Docker, Docker Compose
 
 ## Setup
 
@@ -63,3 +74,11 @@ Browser (builder UI, served at :3001)
 - Publish builds share one runner: two projects pinning conflicting versions of the same npm package overwrite each other sequentially.
 - The Sandpack preview fetches npm packages from CodeSandbox's CDN, so users' browsers need internet access.
 - Each generation costs ~N+2 model calls for an N-file app (plan + architect + one per file).
+
+## Roadmap
+
+Planned work (self-healing builds, durable clarifications, tests, GitHub sync, backend provisioning, …) is tracked in **[ROADMAP.md](ROADMAP.md)**.
+
+## License
+
+[MIT](LICENSE) © 2026 Unnikuttan Vijayan Velamkudy

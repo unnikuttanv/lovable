@@ -24,7 +24,7 @@ app = FastAPI(title="Adorable")
 def user_email(request: Request) -> str:
     email = request.headers.get(AUTH_EMAIL_HEADER) or DEV_USER
     if not email:
-        raise HTTPException(401, "No identity. Access this app through the company SSO proxy (or set DEV_USER for local development).")
+        raise HTTPException(401, "No identity. Access this app through the SSO proxy (or set DEV_USER for local development).")
     return str(email).lower()
 
 

@@ -39,7 +39,7 @@ def _activate(project):
 def _ensure_dependencies(project):
     """Install any project-declared npm packages the runner doesn't have yet.
     Different projects pinning conflicting versions of the same package will
-    overwrite each other sequentially — acceptable for an internal tool."""
+    overwrite each other sequentially — acceptable for a small self-hosted deployment."""
     deps = project.get("dependencies") or {}
     missing = {
         pkg: ver for pkg, ver in deps.items()
